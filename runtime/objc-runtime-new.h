@@ -36,7 +36,7 @@ struct swift_class_t;
 
 struct bucket_t {
 private:
-    cache_key_t _key;
+    cache_key_t _key;  // 当前实现中，其实就是SEL
     IMP _imp;
 
 public:
@@ -803,15 +803,18 @@ struct class_rw_t {
     uint32_t flags;
     uint32_t version;
 
-    const class_ro_t *ro;
+    const class_ro_t *ro;         // 类不可修改的原始核心
 
+    // 下面三个array，method,property, protocol，可以被runtime 扩展，如Category
     method_array_t methods;
     property_array_t properties;
     protocol_array_t protocols;
 
+    // 和继承相关的东西
     Class firstSubclass;
     Class nextSiblingClass;
 
+    // Class对应的 符号名称
     char *demangledName;
 
 #if SUPPORT_INDEXED_ISA

@@ -5451,14 +5451,14 @@ addMethod(Class cls, SEL name, IMP imp, const char *types, bool replace)
 
     method_t *m;
     if ((m = getMethodNoSuper_nolock(cls, name))) {
-        // already exists
-        if (!replace) {
+        // 方法已经存在
+        if (!replace) { // 如果选择不替换，则返回原始的方法，添加方法失败
             result = m->imp;
-        } else {
+        } else {  // 如果选择替换，则返回原始方法，同时，替换为新的方法
             result = _method_setImplementation(cls, m, imp);
         }
     } else {
-        // fixme optimize
+        // 方法不存在, 则在class的方法列表中添加方法, 并返回nil
         method_list_t *newlist;
         newlist = (method_list_t *)calloc(sizeof(*newlist), 1);
         newlist->entsizeAndFlags = 
