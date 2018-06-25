@@ -481,7 +481,7 @@ objc_object::rootRetain(bool tryRetain, bool handleOverflow)
         transcribeToSideTable = false;
         oldisa = LoadExclusive(&isa.bits);
         newisa = oldisa;
-        if (slowpath(!newisa.nonpointer)) {
+        if (slowpath(!newisa.nonpointer)) {  // 如果没有采用isa优化, 则返回sidetable记录的内容, 用slowpath表明这不是一个大概率事件
             ClearExclusive(&isa.bits);
             if (!tryRetain && sideTableLocked) sidetable_unlock();
             if (tryRetain) return sidetable_tryRetain() ? (id)this : nil;
@@ -493,26 +493,29 @@ objc_object::rootRetain(bool tryRetain, bool handleOverflow)
             if (!tryRetain && sideTableLocked) sidetable_unlock();
             return nil;
         }
+        // 采用了isa优化，做extra_rc++，同时检查是否extra_rc溢出，若溢出，则extra_rc减半，并将另一半转存至sidetable
         uintptr_t carry;
         newisa.bits = addc(newisa.bits, RC_ONE, 0, &carry);  // extra_rc++
 
-        if (slowpath(carry)) {
+        if (slowpath(carry)) { // 有carry值，表示extra_rc 溢出
             // newisa.extra_rc++ overflowed
-            if (!handleOverflow) {
+            if (!handleOverflow) {  // 如果不处理溢出情况，则在这里会递归调用一次，再进来的时候，handleOverflow会被rootRetain_overflow设置为true，从而进入到下面的溢出处理流程
                 ClearExclusive(&isa.bits);
                 return rootRetain_overflow(tryRetain);
             }
             // Leave half of the retain counts inline and 
             // prepare to copy the other half to the side table.
             if (!tryRetain && !sideTableLocked) sidetable_lock();
+            
+            // 进行溢出处理：逻辑很简单，先在extra_rc中留一半计数，同时把has_sidetable_rc设置为true，表明借用了sidetable，然后把另一半放到sidetable中
             sideTableLocked = true;
             transcribeToSideTable = true;
             newisa.extra_rc = RC_HALF;
             newisa.has_sidetable_rc = true;
         }
-    } while (slowpath(!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits)));
+    } while (slowpath(!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits))); // 将oldisa 替换为 newisa，并赋值给isa.bits(更新isa_t), 如果不成功，do while再试一遍
 
-    if (slowpath(transcribeToSideTable)) {
+    if (slowpath(transcribeToSideTable)) { //isa的extra_rc溢出，将一半的refer count值放到sidetable中
         // Copy the other half of the retain counts to the side table.
         sidetable_addExtraRC_nolock(RC_HALF);
     }

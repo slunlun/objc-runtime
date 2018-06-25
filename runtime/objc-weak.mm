@@ -319,7 +319,7 @@ weak_entry_for_referent(weak_table_t *weak_table, objc_object *referent)
     size_t hash_displacement = 0;
     while (weak_table->weak_entries[index].referent != referent) {
         index = (index+1) & weak_table->mask;
-        if (index == begin) bad_weak_table(weak_table->weak_entries);
+        if (index == begin) bad_weak_table(weak_table->weak_entries); // 触发bad weak table crash
         hash_displacement++;
         if (hash_displacement > weak_table->max_hash_displacement) {
             return nil;

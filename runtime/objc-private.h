@@ -863,6 +863,7 @@ class StripedMap {
 
     struct PaddedT {
         T value alignas(CacheLineSize);
+        
     };
 
     PaddedT array[StripeCount];
