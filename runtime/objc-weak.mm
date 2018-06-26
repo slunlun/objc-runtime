@@ -153,6 +153,7 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
     if (hash_displacement > entry->max_hash_displacement) { // 记录最大的hash冲突次数, max_hash_displacement意味着: 我们尝试至多max_hash_displacement次，肯定能够找到object对应的hash位置
         entry->max_hash_displacement = hash_displacement;
     }
+    // 将ref存入hash数组，同时，更新元素个数num_refs
     weak_referrer_t &ref = entry->referrers[index];
     ref = new_referrer;
     entry->num_refs++;
@@ -227,7 +228,7 @@ static void weak_entry_insert(weak_table_t *weak_table, weak_entry_t *new_entry)
     weak_entries[index] = *new_entry;
     weak_table->num_entries++;
 
-    if (hash_displacement > weak_table->max_hash_displacement) {
+    if (hash_displacement > weak_table->max_hash_displacement) { // 这里记录最大的hash冲突次数，当查找元素时，hash冲突肯定不会大于这个值
         weak_table->max_hash_displacement = hash_displacement;
     }
 }
@@ -237,10 +238,11 @@ static void weak_resize(weak_table_t *weak_table, size_t new_size)
 {
     size_t old_size = TABLE_SIZE(weak_table);
 
-    weak_entry_t *old_entries = weak_table->weak_entries;
-    weak_entry_t *new_entries = (weak_entry_t *)
+    weak_entry_t *old_entries = weak_table->weak_entries;  // 先把老数据取出来
+    weak_entry_t *new_entries = (weak_entry_t *)   // 在为新的size申请内存
         calloc(new_size, sizeof(weak_entry_t));
 
+    // 重置weak_table的各成员
     weak_table->mask = new_size - 1;
     weak_table->weak_entries = new_entries;
     weak_table->max_hash_displacement = 0;
@@ -250,11 +252,11 @@ static void weak_resize(weak_table_t *weak_table, size_t new_size)
         weak_entry_t *entry;
         weak_entry_t *end = old_entries + old_size;
         for (entry = old_entries; entry < end; entry++) {
-            if (entry->referent) {
+            if (entry->referent) { // 依次将老的数据插入到新的内存空间
                 weak_entry_insert(weak_table, entry);
             }
         }
-        free(old_entries);
+        free(old_entries); // 释放老的内存空间
     }
 }
 
@@ -264,8 +266,8 @@ static void weak_grow_maybe(weak_table_t *weak_table)
     size_t old_size = TABLE_SIZE(weak_table);
 
     // Grow if at least 3/4 full.
-    if (weak_table->num_entries >= old_size * 3 / 4) {
-        weak_resize(weak_table, old_size ? old_size*2 : 64);
+    if (weak_table->num_entries >= old_size * 3 / 4) { // 当大于现有长度的3/4时，会做数组扩容操作
+        weak_resize(weak_table, old_size ? old_size*2 : 64);  // 初次会分配64个位置，之后再原有基础上*2
     }
 }
 
@@ -275,8 +277,8 @@ static void weak_compact_maybe(weak_table_t *weak_table)
     size_t old_size = TABLE_SIZE(weak_table);
 
     // Shrink if larger than 1024 buckets and at most 1/16 full.
-    if (old_size >= 1024  && old_size / 16 >= weak_table->num_entries) {
-        weak_resize(weak_table, old_size / 8);
+    if (old_size >= 1024  && old_size / 16 >= weak_table->num_entries) { // 当前数组长度大于1024，且实际使用空间最多只有1/16时，需要做收缩操作
+        weak_resize(weak_table, old_size / 8); // 缩小8倍
         // leaves new table no more than 1/2 full
     }
 }
