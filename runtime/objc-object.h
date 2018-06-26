@@ -712,20 +712,23 @@ objc_object::rootAutorelease()
 inline uintptr_t 
 objc_object::rootRetainCount()
 {
+    //case 1： 如果是tagged pointer，则直接返回this，因为tagged pointer是不需要引用计数的
     if (isTaggedPointer()) return (uintptr_t)this;
 
+    // 将objcet对应的sidetable上锁
     sidetable_lock();
     isa_t bits = LoadExclusive(&isa.bits);
     ClearExclusive(&isa.bits);
+    // case 2： 如果采用了优化的isa指针
     if (bits.nonpointer) {
-        uintptr_t rc = 1 + bits.extra_rc;
-        if (bits.has_sidetable_rc) {
-            rc += sidetable_getExtraRC_nolock();
+        uintptr_t rc = 1 + bits.extra_rc; // 先读取isa.extra_rc
+        if (bits.has_sidetable_rc) { // 如果extra_rc不够大， 还需要读取sidetable中的数据
+            rc += sidetable_getExtraRC_nolock(); // 总引用计数= rc + sidetable
         }
         sidetable_unlock();
         return rc;
     }
-
+    // case 3：如果没采用优化的isa指针，则直接返回sidetable中的值
     sidetable_unlock();
     return sidetable_retainCount();
 }

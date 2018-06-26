@@ -141,9 +141,9 @@ enum HaveOld { DontHaveOld = false, DoHaveOld = true };
 enum HaveNew { DontHaveNew = false, DoHaveNew = true };
 
 struct SideTable {
-    spinlock_t slock;
-    RefcountMap refcnts;
-    weak_table_t weak_table;
+    spinlock_t slock;           // 自旋锁，防止多线程访问冲突
+    RefcountMap refcnts;        // 对象引用计数map
+    weak_table_t weak_table;    // 对象弱引用map
 
     SideTable() {
         memset(&weak_table, 0, sizeof(weak_table));

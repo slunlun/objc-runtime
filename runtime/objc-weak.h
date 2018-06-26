@@ -78,14 +78,16 @@ typedef DisguisedPtr<objc_object *> weak_referrer_t;
 #define REFERRERS_OUT_OF_LINE 2
 
 struct weak_entry_t {
-    DisguisedPtr<objc_object> referent;
+    DisguisedPtr<objc_object> referent; // 被弱引用的对象
+    
+    // 引用该对象的对象列表，联合。 引用个数小于4，用inline_referrers数组。 用个数大于4，用动态数组weak_referrer_t *referrers
     union {
         struct {
-            weak_referrer_t *referrers;
-            uintptr_t        out_of_line_ness : 2;
-            uintptr_t        num_refs : PTR_MINUS_2;
-            uintptr_t        mask;
-            uintptr_t        max_hash_displacement;
+            weak_referrer_t *referrers;                      // 引用该对象的对象列表动态数组
+            uintptr_t        out_of_line_ness : 2;           // 是否使用动态数组标记位
+            uintptr_t        num_refs : PTR_MINUS_2;         // 动态数组中元素的个数
+            uintptr_t        mask;                           // 用于hash确定动态数组index，值实际上是动态数组空间长度-1（它和num_refs不一样，这里是记录的是数组中位置的个数，而不是数组中实际存储的元素个数）。
+            uintptr_t        max_hash_displacement;          // 最大的hash位移值（用于限制解决hash冲突时再hash的次数）
         };
         struct {
             // out_of_line_ness field is low bits of inline_referrers[1]

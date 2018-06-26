@@ -119,7 +119,8 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
                 return;
             }
         }
-
+        
+        // 如果inline_referrers的4个位置已经存满了，则要转型为referrers，当动态数组。
         // Couldn't insert inline. Allocate out of line.
         weak_referrer_t *new_referrers = (weak_referrer_t *)
             calloc(WEAK_INLINE_COUNT, sizeof(weak_referrer_t));
@@ -135,20 +136,21 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
         entry->max_hash_displacement = 0;
     }
 
+    // 对于动态数组的附加处理：
     assert(entry->out_of_line());
 
-    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) {
+    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) { // 如果动态数组中元素个数大于或等于数组位置总空间的3/4，则扩展数组空间为当前长度的一倍
         return grow_refs_and_insert(entry, new_referrer);
     }
-    size_t begin = w_hash_pointer(new_referrer) & (entry->mask);
-    size_t index = begin;
-    size_t hash_displacement = 0;
+    size_t begin = w_hash_pointer(new_referrer) & (entry->mask); // '& (entry->mask)' 确保了 begin的位置只能大于或等于 数组的长度
+    size_t index = begin;  // 初始的hash index
+    size_t hash_displacement = 0;  // 用于记录hash冲突的次数，也就是hash再位移的次数
     while (entry->referrers[index] != nil) {
         hash_displacement++;
-        index = (index+1) & entry->mask;
-        if (index == begin) bad_weak_table(entry);
+        index = (index+1) & entry->mask;  // index + 1, 移到下一个位置，再试一次能否插入。（这里要考虑到entry->mask取值，一定是：0x111, 0x1111, 0x11111, ... ，因为数组每次都是*2增长，即8， 16， 32，对应动态数组空间长度-1的mask，也就是前面的取值。）
+        if (index == begin) bad_weak_table(entry); // index == begin 意味着数组绕了一圈都没有找到合适位置，这时候一定是出了什么问题。
     }
-    if (hash_displacement > entry->max_hash_displacement) {
+    if (hash_displacement > entry->max_hash_displacement) { // 记录最大的hash冲突次数, max_hash_displacement意味着: 我们尝试至多max_hash_displacement次，肯定能够找到object对应的hash位置
         entry->max_hash_displacement = hash_displacement;
     }
     weak_referrer_t &ref = entry->referrers[index];
