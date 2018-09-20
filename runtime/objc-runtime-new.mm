@@ -6297,7 +6297,7 @@ void *objc_destructInstance(id obj)
         // This order is important.
         if (cxx) object_cxxDestruct(obj); // 调用C++析构函数
         if (assoc) _object_remove_assocations(obj); // 移除所有的关联对象，并将其自身从Association Manager的map中移除
-        obj->clearDeallocating(); // 清理ARC ivar
+        obj->clearDeallocating(); // 清理相关的引用
     }
 
     return obj;

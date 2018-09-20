@@ -111,7 +111,7 @@ static void grow_refs_and_insert(weak_entry_t *entry,
  */
 static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
 {
-    if (! entry->out_of_line()) {
+    if (! entry->out_of_line()) { // 如果weak_entry 使用了初始的数组存储，则直接放到数组里
         // Try to insert inline.
         for (size_t i = 0; i < WEAK_INLINE_COUNT; i++) {
             if (entry->inline_referrers[i] == nil) {
@@ -120,7 +120,7 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
             }
         }
         
-        // 如果inline_referrers的4个位置已经存满了，则要转型为referrers，当动态数组。
+        // 如果inline_referrers的4个位置已经存满了，则要转型为referrers，做动态数组。
         // Couldn't insert inline. Allocate out of line.
         weak_referrer_t *new_referrers = (weak_referrer_t *)
             calloc(WEAK_INLINE_COUNT, sizeof(weak_referrer_t));
@@ -137,11 +137,16 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
     }
 
     // 对于动态数组的附加处理：
-    assert(entry->out_of_line());
+    assert(entry->out_of_line()); // 断言： 此时一定使用的动态数组
 
-    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) { // 如果动态数组中元素个数大于或等于数组位置总空间的3/4，则扩展数组空间为当前长度的一倍
-        return grow_refs_and_insert(entry, new_referrer);
+    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) { // 如果动态数组中元素个数大于或等于数组位置总空间的3/4，则扩展数组空间为当前长度的一倍(第一次应该是扩容为8，因为只有4个从静态数组转换过来的初始值)
+        return grow_refs_and_insert(entry, new_referrer); // 扩容，并插入
     }
+    
+    // 如果不需要扩容，直接插入到weak_entry中
+    // 注意，weak_entry是一个哈希表，key：w_hash_pointer(new_referrer) value: new_referrer
+    
+    // 细心的人可能注意到了，这里weak_entry_t 的hash算法和 weak_table_t的hash算法是一样的，同时扩容/减容的算法也是一样的
     size_t begin = w_hash_pointer(new_referrer) & (entry->mask); // '& (entry->mask)' 确保了 begin的位置只能大于或等于 数组的长度
     size_t index = begin;  // 初始的hash index
     size_t hash_displacement = 0;  // 用于记录hash冲突的次数，也就是hash再位移的次数
@@ -359,8 +364,10 @@ weak_unregister_no_lock(weak_table_t *weak_table, id referent_id,
 
     if (!referent) return;
 
-    if ((entry = weak_entry_for_referent(weak_table, referent))) {
-        remove_referrer(entry, referrer);
+    if ((entry = weak_entry_for_referent(weak_table, referent))) { // 查找到referent所对应的weak_entry_t
+        remove_referrer(entry, referrer);  // 在referent所对应的weak_entry_t的hash数组中，移除referrer
+       
+        // 移除元素之后， 要检查一下weak_entry_t的hash数组是否已经空了
         bool empty = true;
         if (entry->out_of_line()  &&  entry->num_refs != 0) {
             empty = false;
@@ -374,7 +381,7 @@ weak_unregister_no_lock(weak_table_t *weak_table, id referent_id,
             }
         }
 
-        if (empty) {
+        if (empty) { // 如果weak_entry_t的hash数组已经空了，则需要将weak_entry_t从weak_table中移除
             weak_entry_remove(weak_table, entry);
         }
     }
@@ -398,6 +405,7 @@ weak_register_no_lock(weak_table_t *weak_table, id referent_id,
     objc_object *referent = (objc_object *)referent_id;
     objc_object **referrer = (objc_object **)referrer_id;
 
+    // 如果referent为nil 或 referent 采用了TaggedPointer计数方式，直接返回，不做任何操作
     if (!referent  ||  referent->isTaggedPointer()) return referent_id;
 
     // ensure that the referenced object is viable
@@ -416,7 +424,7 @@ weak_register_no_lock(weak_table_t *weak_table, id referent_id,
         deallocating =
             ! (*allowsWeakReference)(referent, SEL_allowsWeakReference);
     }
-
+    // 正在析构的对象，不能够被弱引用
     if (deallocating) {
         if (crashIfDeallocating) {
             _objc_fatal("Cannot form weak reference to instance (%p) of "
@@ -429,11 +437,12 @@ weak_register_no_lock(weak_table_t *weak_table, id referent_id,
     }
 
     // now remember it and where it is being stored
+    // 在 weak_table中找到referent对应的weak_entry,并将referrer加入到weak_entry中
     weak_entry_t *entry;
-    if ((entry = weak_entry_for_referent(weak_table, referent))) {
+    if ((entry = weak_entry_for_referent(weak_table, referent))) { // 如果能找到weak_entry,则讲referrer插入到weak_entry中
         append_referrer(entry, referrer);
     } 
-    else {
+    else { // 如果找不到，就新建一个
         weak_entry_t new_entry(referent, referrer);
         weak_grow_maybe(weak_table);
         weak_entry_insert(weak_table, &new_entry);

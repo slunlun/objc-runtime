@@ -331,20 +331,22 @@ storeWeak(id *location, objc_object *newObj)
     // Order by lock address to prevent lock ordering problems. 
     // Retry if the old value changes underneath us.
  retry:
-    if (haveOld) {
+    if (haveOld) { // 如果weak ptr之前弱引用过一个obj，则将这个obj所对应的SideTable取出，赋值给oldTable
         oldObj = *location;
         oldTable = &SideTables()[oldObj];
     } else {
-        oldTable = nil;
+        oldTable = nil; // 如果weak ptr之前没有弱引用过一个obj，则oldTable = nil
     }
-    if (haveNew) {
+    if (haveNew) { // 如果weak ptr要weak引用一个新的obj，则将该obj对应的SideTable取出，赋值给newTable
         newTable = &SideTables()[newObj];
     } else {
-        newTable = nil;
+        newTable = nil; // 如果weak ptr不需要引用一个新obj，则newTable = nil
     }
-
+    
+    // 加锁操作，防止多线程中竞争冲突
     SideTable::lockTwo<haveOld, haveNew>(oldTable, newTable);
 
+    // location 应该与 oldObj 保持一致，如果不同，说明当前的 location 已经处理过 oldObj 可是又被其他线程所修改
     if (haveOld  &&  *location != oldObj) {
         SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
         goto retry;
@@ -356,7 +358,7 @@ storeWeak(id *location, objc_object *newObj)
     if (haveNew  &&  newObj) {
         Class cls = newObj->getIsa();
         if (cls != previouslyInitializedClass  &&  
-            !((objc_class *)cls)->isInitialized()) 
+            !((objc_class *)cls)->isInitialized())  // 如果cls还没有初始化，先初始化，再尝试设置weak
         {
             SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
             _class_initialize(_class_getNonMetaClass(cls, (id)newObj));
@@ -367,39 +369,43 @@ storeWeak(id *location, objc_object *newObj)
             // then we may proceed but it will appear initializing and 
             // not yet initialized to the check above.
             // Instead set previouslyInitializedClass to recognize it on retry.
-            previouslyInitializedClass = cls;
+            previouslyInitializedClass = cls; // 这里记录一下previouslyInitializedClass， 防止改if分支再次进入
 
-            goto retry;
+            goto retry; // 重新获取一遍newObj，这时的newObj应该已经初始化过了
         }
     }
 
     // Clean up old value, if any.
     if (haveOld) {
-        weak_unregister_no_lock(&oldTable->weak_table, oldObj, location);
+        weak_unregister_no_lock(&oldTable->weak_table, oldObj, location); // 如果weak_ptr之前弱引用过别的对象oldObj，则调用weak_unregister_no_lock，在oldObj的weak_entry_t中移除该weak_ptr地址
     }
 
     // Assign new value, if any.
-    if (haveNew) {
+    if (haveNew) { // 如果weak_ptr需要弱引用新的对象newObj
+        // (1) 调用weak_register_no_lock方法，将weak ptr的地址记录到newObj对应的weak_entry_t中
         newObj = (objc_object *)
             weak_register_no_lock(&newTable->weak_table, (id)newObj, location, 
                                   crashIfDeallocating);
         // weak_register_no_lock returns nil if weak store should be rejected
-
+        
+        // (2) 更新newObj的isa的weakly_referenced bit标志位
         // Set is-weakly-referenced bit in refcount table.
         if (newObj  &&  !newObj->isTaggedPointer()) {
             newObj->setWeaklyReferenced_nolock();
         }
 
         // Do not set *location anywhere else. That would introduce a race.
-        *location = (id)newObj;
+        // （3）*location 赋值，也就是将weak ptr直接指向了newObj。可以看到，这里并没有将newObj的引用计数+1
+        *location = (id)newObj; // 将weak ptr指向object
     }
     else {
         // No new value. The storage is not changed.
     }
     
+    // 解锁，其他线程可以访问oldTable, newTable了
     SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
 
-    return (id)newObj;
+    return (id)newObj; // 返回newObj，此时的newObj与刚传入时相比，weakly-referenced bit位置1
 }
 
 
@@ -454,6 +460,11 @@ objc_storeWeakOrNil(id *location, id newObj)
  * @param location Address of __weak ptr. 
  * @param newObj Object ptr. 
  */
+
+// @param location __weak 指针的地址
+// @param newObj 被弱引用的对象指针
+// @return __weak 指针
+
 id
 objc_initWeak(id *location, id newObj)
 {
@@ -615,6 +626,7 @@ objc_copyWeak(id *dst, id *src)
  * modifications to either weak variable. (Concurrent weak clear is safe.)
  *
  */
+
 void
 objc_moveWeak(id *dst, id *src)
 {
@@ -703,13 +715,13 @@ class AutoreleasePoolPage
 #endif
     static size_t const COUNT = SIZE / sizeof(id);
 
-    magic_t const magic;
-    id *next;
-    pthread_t const thread;
-    AutoreleasePoolPage * const parent;
-    AutoreleasePoolPage *child;
-    uint32_t const depth;
-    uint32_t hiwat;
+    magic_t const magic;                // 魔数，用于自身的完整性校验                                                         16字节
+    id *next;                           // 指向autorelePool page中的下一个可用位置                                           8字节
+    pthread_t const thread;             // 和autorelePool page中相关的线程                                                  8字节
+    AutoreleasePoolPage * const parent; // autoreleasPool page双向链表的前向指针                                             8字节
+    AutoreleasePoolPage *child;         // autoreleasPool page双向链表的后向指针                                             8字节
+    uint32_t const depth;               // 当前autoreleasPool page在双向链表中的位置（深度）                                   4字节
+    uint32_t hiwat;                     // high water mark. 最高水位，可用近似理解为autoreleasPool page双向链表中的元素个数       4字节
 
     // SIZE-sizeof(*this) bytes of contents follow
 
@@ -1008,14 +1020,14 @@ class AutoreleasePoolPage
         assert(!hotPage());
 
         bool pushExtraBoundary = false;
-        if (haveEmptyPoolPlaceholder()) {
+        if (haveEmptyPoolPlaceholder()) { // 如果当前线程只有一个虚拟的空池，则这次需要真正创建一个page
             // We are pushing a second pool over the empty placeholder pool
             // or pushing the first object into the empty placeholder pool.
             // Before doing that, push a pool boundary on behalf of the pool 
             // that is currently represented by the empty placeholder.
             pushExtraBoundary = true;
         }
-        else if (obj != POOL_BOUNDARY  &&  DebugMissingPools) {
+        else if (obj != POOL_BOUNDARY  &&  DebugMissingPools) { // Debug 模式，不去care它的源码
             // We are pushing an object with no pool in place, 
             // and no-pool debugging was requested by environment.
             _objc_inform("MISSING POOLS: (%p) Object %p of class %s "
@@ -1026,7 +1038,7 @@ class AutoreleasePoolPage
             objc_autoreleaseNoPool(obj);
             return nil;
         }
-        else if (obj == POOL_BOUNDARY  &&  !DebugPoolAllocation) {
+        else if (obj == POOL_BOUNDARY  &&  !DebugPoolAllocation) { // 如果obj == POOL_BOUNDARY，这里苹果有个小心机，它不会真正创建page，而是在线程的TSD中做了一个空池的标志
             // We are pushing a pool with no pool in place,
             // and alloc-per-pool debugging was not requested.
             // Install and return the empty pool placeholder.
@@ -1035,16 +1047,16 @@ class AutoreleasePoolPage
 
         // We are pushing an object or a non-placeholder'd pool.
 
-        // Install the first page.
+        // 创建线程的第一个page，并置为hot page。
         AutoreleasePoolPage *page = new AutoreleasePoolPage(nil);
         setHotPage(page);
         
-        // Push a boundary on behalf of the previously-placeholder'd pool.
+        // 如果之前只是做了空池标记，这里还需要在栈中补上POOL_BOUNDARY，作为栈底哨兵
         if (pushExtraBoundary) {
             page->add(POOL_BOUNDARY);
         }
         
-        // Push the requested object or pool.
+        // Push the requested object or pool.  注意，这里的注释，进入page的不光可以有object，还可以是pool。
         return page->add(obj);
     }
 
@@ -1132,7 +1144,8 @@ public:
                 // 1. top-level pool is popped, leaving the cold page in place
                 // 2. an object is autoreleased with no pool
             } else {
-                // Error. For bincompat purposes this is not 
+                // 这是为了兼容旧的SDK，看来在新的SDK里面，token 可能的取值只有两个:POOL_BOUNDARY, page->begin() && !page->parent
+                // Error. For bincompat purposes this is not
                 // fatal in executables built with old SDKs.
                 return badPop(token);
             }
@@ -1652,7 +1665,7 @@ void
 objc_release(id obj)
 {
     if (!obj) return;
-    if (obj->isTaggedPointer()) return;
+    if (obj->isTaggedPointer()) return; // taggedPointer 不用做任何操作
     return obj->release();
 }
 
