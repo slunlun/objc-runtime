@@ -79,7 +79,7 @@ static void grow_refs_and_insert(weak_entry_t *entry,
     assert(entry->out_of_line());
 
     size_t old_size = TABLE_SIZE(entry);
-    size_t new_size = old_size ? old_size * 2 : 8;
+    size_t new_size = old_size ? old_size * 2 : 8; // 每次扩容为上一次容量的2倍
 
     size_t num_refs = entry->num_refs;
     weak_referrer_t *old_refs = entry->referrers;
@@ -92,7 +92,7 @@ static void grow_refs_and_insert(weak_entry_t *entry,
     
     for (size_t i = 0; i < old_size && num_refs > 0; i++) {
         if (old_refs[i] != nil) {
-            append_referrer(entry, old_refs[i]);
+            append_referrer(entry, old_refs[i]); // 将旧的数据转移到新的动态数组中
             num_refs--;
         }
     }
@@ -111,7 +111,7 @@ static void grow_refs_and_insert(weak_entry_t *entry,
  */
 static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
 {
-    if (! entry->out_of_line()) { // 如果weak_entry 使用了初始的数组存储，则直接放到数组里
+    if (! entry->out_of_line()) { // 如果weak_entry 尚未使用动态数组，走这里
         // Try to insert inline.
         for (size_t i = 0; i < WEAK_INLINE_COUNT; i++) {
             if (entry->inline_referrers[i] == nil) {
@@ -120,7 +120,7 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
             }
         }
         
-        // 如果inline_referrers的4个位置已经存满了，则要转型为referrers，做动态数组。
+        // 如果inline_referrers的位置已经存满了，则要转型为referrers，做动态数组。
         // Couldn't insert inline. Allocate out of line.
         weak_referrer_t *new_referrers = (weak_referrer_t *)
             calloc(WEAK_INLINE_COUNT, sizeof(weak_referrer_t));
@@ -139,7 +139,7 @@ static void append_referrer(weak_entry_t *entry, objc_object **new_referrer)
     // 对于动态数组的附加处理：
     assert(entry->out_of_line()); // 断言： 此时一定使用的动态数组
 
-    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) { // 如果动态数组中元素个数大于或等于数组位置总空间的3/4，则扩展数组空间为当前长度的一倍(第一次应该是扩容为8，因为只有4个从静态数组转换过来的初始值)
+    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) { // 如果动态数组中元素个数大于或等于数组位置总空间的3/4，则扩展数组空间为当前长度的一倍
         return grow_refs_and_insert(entry, new_referrer); // 扩容，并插入
     }
     
@@ -476,7 +476,7 @@ weak_clear_no_lock(weak_table_t *weak_table, id referent_id)
 {
     objc_object *referent = (objc_object *)referent_id;
 
-    weak_entry_t *entry = weak_entry_for_referent(weak_table, referent);
+    weak_entry_t *entry = weak_entry_for_referent(weak_table, referent); // 找到referent在weak_table中对应的weak_entry_t
     if (entry == nil) {
         /// XXX shouldn't happen, but does with mismatched CF/objc
         //printf("XXX no entry for clear deallocating %p\n", referent);
@@ -487,6 +487,7 @@ weak_clear_no_lock(weak_table_t *weak_table, id referent_id)
     weak_referrer_t *referrers;
     size_t count;
     
+    // 找出weak引用referent的weak 指针地址数组以及数组长度
     if (entry->out_of_line()) {
         referrers = entry->referrers;
         count = TABLE_SIZE(entry);
@@ -497,12 +498,12 @@ weak_clear_no_lock(weak_table_t *weak_table, id referent_id)
     }
     
     for (size_t i = 0; i < count; ++i) {
-        objc_object **referrer = referrers[i];
+        objc_object **referrer = referrers[i]; // 取出每个weak ptr的地址
         if (referrer) {
-            if (*referrer == referent) {
+            if (*referrer == referent) { // 如果weak ptr确实weak引用了referent，则将weak ptr设置为nil，这也就是为什么weak 指针会自动设置为nil的原因
                 *referrer = nil;
             }
-            else if (*referrer) {
+            else if (*referrer) { // 如果所存储的weak ptr没有weak 引用referent，这可能是由于runtime代码的逻辑错误引起的，报错
                 _objc_inform("__weak variable at %p holds %p instead of %p. "
                              "This is probably incorrect use of "
                              "objc_storeWeak() and objc_loadWeak(). "
@@ -513,6 +514,6 @@ weak_clear_no_lock(weak_table_t *weak_table, id referent_id)
         }
     }
     
-    weak_entry_remove(weak_table, entry);
+    weak_entry_remove(weak_table, entry); // 由于referent要被释放了，因此referent的weak_entry_t也要移除出weak_table
 }
 

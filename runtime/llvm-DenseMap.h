@@ -65,9 +65,9 @@ protected:
 public:
   typedef KeyT key_type;
   typedef ValueT mapped_type;
-  typedef BucketT value_type;
+  typedef BucketT value_type;  // 桶 实际上是value，和key 的pair
 
-  typedef DenseMapIterator<KeyT, ValueT, KeyInfoT> iterator;
+  typedef DenseMapIterator<KeyT, ValueT, KeyInfoT> iterator; // 遍历器
   typedef DenseMapIterator<KeyT, ValueT,
                            KeyInfoT, true> const_iterator;
   inline iterator begin() {

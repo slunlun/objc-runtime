@@ -862,18 +862,19 @@ class StripedMap {
 #endif
 
     struct PaddedT {
-        T value alignas(CacheLineSize);
+        T value alignas(CacheLineSize); // T value 64字节对齐
         
     };
 
-    PaddedT array[StripeCount];
+    PaddedT array[StripeCount]; // 所有PaddedT struct 类型数据被存储在array数组中。iOS 设备 StripeCount == 64
 
-    static unsigned int indexForPointer(const void *p) {
+    static unsigned int indexForPointer(const void *p) { // 该方法以void *作为key 来获取void *对应在StripedMap 中的位置
         uintptr_t addr = reinterpret_cast<uintptr_t>(p);
-        return ((addr >> 4) ^ (addr >> 9)) % StripeCount;
+        return ((addr >> 4) ^ (addr >> 9)) % StripeCount; // % StripeCount 防止index越界
     }
 
  public:
+    // 取值方法 [p],
     T& operator[] (const void *p) { 
         return array[indexForPointer(p)].value; 
     }
@@ -881,6 +882,7 @@ class StripedMap {
         return const_cast<StripedMap<T>>(this)[p]; 
     }
 
+    
     // Shortcuts for StripedMaps of locks.
     void lockAll() {
         for (unsigned int i = 0; i < StripeCount; i++) {

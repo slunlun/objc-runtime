@@ -145,14 +145,17 @@ struct SideTable {
     RefcountMap refcnts;        // 对象引用计数map
     weak_table_t weak_table;    // 对象弱引用map
 
+    // 构造函数
     SideTable() {
         memset(&weak_table, 0, sizeof(weak_table));
     }
 
+    //析构函数(看看函数体，苹果设计的SideTable其实不希望被析构，不然会引起fatal 错误)
     ~SideTable() {
         _objc_fatal("Do not delete SideTable.");
     }
 
+    // 锁操作 符合StripedMap对T的定义
     void lock() { slock.lock(); }
     void unlock() { slock.unlock(); }
     void forceReset() { slock.forceReset(); }
@@ -1292,13 +1295,13 @@ objc_object::clearDeallocating_slow()
 {
     assert(isa.nonpointer  &&  (isa.weakly_referenced || isa.has_sidetable_rc));
 
-    SideTable& table = SideTables()[this];
+    SideTable& table = SideTables()[this]; // 在全局的SideTables中，以this指针为key，找到对应的SideTable
     table.lock();
-    if (isa.weakly_referenced) {
-        weak_clear_no_lock(&table.weak_table, (id)this);
+    if (isa.weakly_referenced) { // 如果obj被弱引用
+        weak_clear_no_lock(&table.weak_table, (id)this); // 在SideTable的weak_table中对this进行清理工作
     }
-    if (isa.has_sidetable_rc) {
-        table.refcnts.erase(this);
+    if (isa.has_sidetable_rc) { // 如果采用了SideTable做引用计数
+        table.refcnts.erase(this); // 在SideTable的引用计数中移除this
     }
     table.unlock();
 }

@@ -82,13 +82,16 @@ struct weak_entry_t {
     
     // 引用该对象的对象列表，联合。 引用个数小于4，用inline_referrers数组。 用个数大于4，用动态数组weak_referrer_t *referrers
     union {
+        // 动态数组模式
         struct {
-            weak_referrer_t *referrers;                      // 弱引用该对象的对象列表的动态数组
-            uintptr_t        out_of_line_ness : 2;           // 是否使用动态数组标记位
-            uintptr_t        num_refs : PTR_MINUS_2;         // 动态数组中元素的个数
-            uintptr_t        mask;                           // 用于hash确定动态数组index，值实际上是动态数组空间长度-1（它和num_refs不一样，这里是记录的是数组中位置的个数，而不是数组中实际存储的元素个数）。
-            uintptr_t        max_hash_displacement;          // 最大的hash冲突次数（说明了最多做max_hash_displacement次再hash，肯定会找到对应的数据）
+            weak_referrer_t *referrers;                      // 弱引用该对象的对象指针地址的hash数组
+            uintptr_t        out_of_line_ness : 2;           // 是否使用动态hash数组标记位
+            uintptr_t        num_refs : PTR_MINUS_2;         // hash数组中的元素个数
+            uintptr_t        mask;                           // hash数组长度-1，会参与hash计算。（注意，这里是hash数组的长度，而不是元素个数。比如，数组长度可能是64，而元素个数仅存了2个）素个数）。
+            uintptr_t        max_hash_displacement;          // 可能会发生的hash冲突的最大次数，用于判断是否出现了逻辑错误（hash表中的冲突次数绝不会超过改值）
         };
+        
+        // 定长数组模式
         struct {
             // out_of_line_ness field is low bits of inline_referrers[1]
             weak_referrer_t  inline_referrers[WEAK_INLINE_COUNT];
@@ -122,7 +125,7 @@ struct weak_table_t {
     weak_entry_t *weak_entries;        // hash数组，用来存储弱引用对象的相关信息weak_entry_t
     size_t    num_entries;             // hash数组中的元素个数
     uintptr_t mask;                    // hash数组长度-1，会参与hash计算。（注意，这里是hash数组的长度，而不是元素个数。比如，数组长度可能是64，而元素个数仅存了2个）
-    uintptr_t max_hash_displacement;   // 可能会发生的hash冲突的最大次数
+    uintptr_t max_hash_displacement;   // 可能会发生的hash冲突的最大次数，用于判断是否出现了逻辑错误（hash表中的冲突次数绝不会超过改值）
 };
 
 /// Adds an (object, weak pointer) pair to the weak table.
